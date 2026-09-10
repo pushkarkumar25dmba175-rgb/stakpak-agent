@@ -1,0 +1,3 @@
+/target
+# Agent state: sessions, backups, and shell history.
+.stakpak/
