@@ -1,0 +1,74 @@
+name: organize_downloads
+description: Sort a downloads folder into per-type subfolders, moving nothing until you approve it.
+version: 1
+created_by: user
+inputs:
+  folder:
+    type: string
+    description: The folder to organise.
+    required: true
+    default: "~/Downloads"
+  destination:
+    type: string
+    description: Where the sorted folders are created.
+    required: false
+    default: "~/Downloads/sorted"
+permissions:
+  - filesystem.read
+  - filesystem.write
+max_risk_level: 2
+tags: [files, housekeeping]
+steps:
+  - id: survey
+    description: Look at what is in the folder
+    tool: filesystem
+    operation: list
+    arguments:
+      path: "{{ inputs.folder }}"
+      recursive: false
+    expected_outcome: A listing of everything currently in the folder.
+    verification:
+      kind: count_at_least
+      field: count
+      minimum: 0
+  - id: make_documents
+    description: Create the documents subfolder
+    tool: filesystem
+    operation: mkdir
+    arguments:
+      path: "{{ inputs.destination }}/documents"
+    verification:
+      kind: path_exists
+  - id: make_images
+    description: Create the images subfolder
+    tool: filesystem
+    operation: mkdir
+    arguments:
+      path: "{{ inputs.destination }}/images"
+    verification:
+      kind: path_exists
+  - id: make_archives
+    description: Create the archives subfolder
+    tool: filesystem
+    operation: mkdir
+    arguments:
+      path: "{{ inputs.destination }}/archives"
+    verification:
+      kind: path_exists
+  - id: report
+    description: Write a note recording what was found
+    tool: filesystem
+    operation: write
+    arguments:
+      path: "{{ inputs.destination }}/last-survey.md"
+      content: |
+        # Downloads survey
+
+        Source folder: {{ inputs.folder }}
+        Entries found: {{ steps.survey.data.count }}
+
+        Subfolders are ready. Move files into them with a follow-up request,
+        for example: "move the PDFs in Downloads into sorted/documents".
+    depends_on: [survey, make_documents, make_images, make_archives]
+    verification:
+      kind: path_nonempty

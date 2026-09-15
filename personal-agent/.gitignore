@@ -1,0 +1,26 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# Local state and secrets — none of this belongs in version control
+.env
+*.db
+*.db-wal
+*.db-shm
+logs/
+agent_trash/
+backups/
+work/
+skills/generated/
+skills/versions/
+skills/deleted/

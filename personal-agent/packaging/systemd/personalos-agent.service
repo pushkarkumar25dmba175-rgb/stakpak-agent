@@ -1,0 +1,33 @@
+# Install to ~/.config/systemd/user/personalos-agent.service
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now personalos-agent
+#
+# Runs as your user, not root. It starts the scheduler and nothing else.
+
+[Unit]
+Description=PersonalOS Agent (scheduler service)
+Documentation=https://github.com/pushkarkumar25dmba175-rgb/stakpak-agent
+After=default.target
+
+[Service]
+Type=simple
+ExecStart=%h/.local/bin/agent schedule serve
+Restart=on-failure
+RestartSec=10
+
+# The agent only needs its own home plus whatever you put in allowed_roots.
+Environment=PERSONALOS_HOME=%h/.personalos
+WorkingDirectory=%h
+
+# Defence in depth: even if something goes wrong, the service cannot gain
+# privileges or write to system locations.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-write
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+
+[Install]
+WantedBy=default.target

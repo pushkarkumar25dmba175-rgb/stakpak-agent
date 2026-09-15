@@ -1,0 +1,16 @@
+{
+  "name": "threat-research",
+  "description": "Daily threat-intelligence reading, triage and write-ups.",
+  "directories": [
+    "~/Research/threat-intel",
+    "~/Research/threat-intel/inbox"
+  ],
+  "preferred_tools": ["filesystem", "documents"],
+  "memory_namespace": "threat-research",
+  "skills": ["daily_summary"],
+  "rules": [
+    "Name files YYYY-MM-DD-source-topic.",
+    "Write summaries as Markdown, never as PDFs.",
+    "Never move anything out of inbox/ without asking."
+  ]
+}

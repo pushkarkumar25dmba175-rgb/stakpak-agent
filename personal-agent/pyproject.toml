@@ -1,0 +1,80 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "personalos-agent"
+version = "0.1.0"
+description = "PersonalOS Agent - a local-first, auditable personal AI coworker that lives on your computer."
+readme = "README.md"
+requires-python = ">=3.12"
+license = { text = "Apache-2.0" }
+authors = [{ name = "PersonalOS Agent contributors" }]
+keywords = ["agent", "llm", "automation", "local-first", "personal-assistant"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Environment :: Console",
+  "Intended Audience :: End Users/Desktop",
+  "Programming Language :: Python :: 3.12",
+  "Topic :: Utilities",
+]
+
+dependencies = [
+  "typer>=0.15",
+  "rich>=13.9",
+  "pydantic>=2.10",
+  "SQLAlchemy>=2.0.36",
+  "PyYAML>=6.0.2",
+  "python-dotenv>=1.0.1",
+  "httpx>=0.28",
+]
+
+[project.optional-dependencies]
+scheduler = ["APScheduler>=3.11"]
+watch = ["watchdog>=6.0"]
+dashboard = ["fastapi>=0.115", "uvicorn>=0.34"]
+docs = ["pypdf>=5.1"]
+dev = [
+  "pytest>=8.3",
+  "pytest-asyncio>=0.25",
+  "pytest-cov>=6.0",
+  "ruff>=0.8",
+  "mypy>=1.14",
+]
+all = [
+  "APScheduler>=3.11",
+  "watchdog>=6.0",
+  "fastapi>=0.115",
+  "uvicorn>=0.34",
+  "pypdf>=5.1",
+]
+
+[project.scripts]
+agent = "personalos.interface.cli:main"
+personalos = "personalos.interface.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/pushkarkumar25dmba175-rgb/stakpak-agent"
+Repository = "https://github.com/pushkarkumar25dmba175-rgb/stakpak-agent"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/personalos"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+addopts = "-q"
+filterwarnings = ["ignore::DeprecationWarning"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "W"]
+ignore = ["E501", "B008"]
+
+[tool.mypy]
+python_version = "3.12"
+warn_unused_ignores = true
+ignore_missing_imports = true
