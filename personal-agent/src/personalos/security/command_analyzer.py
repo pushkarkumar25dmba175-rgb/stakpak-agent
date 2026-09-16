@@ -83,28 +83,183 @@ class CommandAnalysis:
         return " | ".join(parts)
 
 
-def _extract_programs(command: str) -> tuple[list[str], str | None]:
-    """Best-effort extraction of every program name on a command line."""
-    try:
-        tokens = shlex.split(command, comments=True)
-    except ValueError as exc:
-        return [], str(exc)
+#: Programs that run another program given to them as an argument. Seeing one
+#: of these means the *next* token is also a program worth reporting.
+_WRAPPERS = frozenset({"sudo", "doas", "env", "nohup", "time", "xargs", "nice", "ionice", "timeout"})
 
-    programs: list[str] = []
-    expect_program = True
-    for token in tokens:
-        if token in {"&&", "||", "|", ";", "&"}:
-            expect_program = True
+#: Shells that take a script to run via `-c`. Their payload is a command line
+#: in its own right and has to be analysed as one.
+_SHELLS = frozenset({"sh", "bash", "zsh", "fish", "dash", "ksh", "csh", "tcsh", "ash"})
+
+#: Recursion limit for nested `-c` payloads and command substitutions.
+_MAX_NESTING = 5
+
+#: Numbers and durations, which appear as wrapper arguments rather than programs.
+_VALUE_ARG = re.compile(r"\d+(\.\d+)?[smhd]?")
+
+#: Unquoted operators that end one command and begin another.
+_SEPARATORS = (";;", "&&", "||", ";", "|", "&", "\n")
+
+
+def _split_segments(command: str) -> list[str]:
+    """Split a command line into individual commands on unquoted separators.
+
+    ``shlex`` alone is not enough: it tokenises ``echo hi; payload`` as
+    ``["echo", "hi;", "payload"]``, gluing the separator to the previous word,
+    so a scan looking for a bare ``;`` token never sees the boundary and every
+    program after it becomes invisible. Splitting on the raw string first, with
+    quote tracking, is what makes the boundary reliable.
+    """
+    segments: list[str] = []
+    current: list[str] = []
+    quote: str | None = None
+    index = 0
+
+    while index < len(command):
+        char = command[index]
+
+        if char == "\\" and quote != "'" and index + 1 < len(command):
+            current.append(command[index : index + 2])
+            index += 2
             continue
-        if expect_program:
-            # `sudo apt install` should report both `sudo` and `apt`.
-            name = token.split("/")[-1]
-            if name and not name.startswith("-") and "=" not in name:
-                programs.append(name)
-                expect_program = name in {"sudo", "doas", "env", "nohup", "time", "xargs"}
-            else:
-                expect_program = True
-    return programs, None
+
+        if quote is not None:
+            current.append(char)
+            if char == quote:
+                quote = None
+            index += 1
+            continue
+
+        if char in {"'", '"'}:
+            quote = char
+            current.append(char)
+            index += 1
+            continue
+
+        for separator in _SEPARATORS:
+            if command.startswith(separator, index):
+                segments.append("".join(current))
+                current = []
+                index += len(separator)
+                break
+        else:
+            current.append(char)
+            index += 1
+
+    segments.append("".join(current))
+    return [segment.strip() for segment in segments if segment.strip()]
+
+
+def _substitutions(command: str) -> list[str]:
+    """Extract the bodies of ``$(...)`` and backtick command substitutions.
+
+    Their contents run as commands, so they are analysed like any other segment.
+    """
+    found: list[str] = []
+    index = 0
+    while index < len(command):
+        if command.startswith("$(", index):
+            depth, cursor = 1, index + 2
+            while cursor < len(command) and depth:
+                if command.startswith("$(", cursor):
+                    depth += 1
+                    cursor += 2
+                    continue
+                if command[cursor] == ")":
+                    depth -= 1
+                cursor += 1
+            found.append(command[index + 2 : cursor - 1])
+            index = cursor
+            continue
+        if command[index] == "`":
+            end = command.find("`", index + 1)
+            if end == -1:
+                break
+            found.append(command[index + 1 : end])
+            index = end + 1
+            continue
+        index += 1
+    return [item.strip() for item in found if item.strip()]
+
+
+def _programs_in_segment(
+    segment: str, programs: list[str], errors: list[str], depth: int
+) -> None:
+    """Collect program names from one command, recursing into what it runs."""
+    if depth > _MAX_NESTING:
+        errors.append("nesting limit exceeded")
+        return
+
+    try:
+        tokens = shlex.split(segment, comments=True)
+    except ValueError as exc:
+        errors.append(str(exc))
+        return
+
+    index = 0
+    while index < len(tokens):
+        token = tokens[index]
+        # `FOO=bar cmd` — assignments precede the program they apply to.
+        if "=" in token and not token.startswith("-") and "/" not in token.split("=")[0]:
+            index += 1
+            continue
+        if token.startswith("-"):
+            index += 1
+            continue
+        # A wrapper's own value argument, e.g. the `5` in `timeout 5 ls` or the
+        # `10` in `nice -n 10 cmd`. Never a program name in practice.
+        if _VALUE_ARG.fullmatch(token):
+            index += 1
+            continue
+
+        name = token.rsplit("/", 1)[-1]
+        if not name:
+            index += 1
+            continue
+        programs.append(name)
+
+        if name in _SHELLS:
+            # Analyse the script passed to `-c` as a command line of its own.
+            # It goes through _extract_programs, not straight back into this
+            # function, so that a payload which itself chains or pipes is split
+            # into segments rather than read as one command.
+            for offset in range(index + 1, len(tokens)):
+                if tokens[offset] == "-c" and offset + 1 < len(tokens):
+                    nested, error = _extract_programs(tokens[offset + 1], depth + 1)
+                    programs.extend(nested)
+                    if error:
+                        errors.append(error)
+                    break
+            return
+        if name in _WRAPPERS:
+            # Skip this wrapper's own flags and report what it goes on to run.
+            index += 1
+            continue
+        return
+
+
+def _extract_programs(command: str, depth: int = 0) -> tuple[list[str], str | None]:
+    """Extract every program a command line would invoke.
+
+    Handles chained commands, nested shell payloads, command substitutions and
+    wrapper programs. Anything it cannot parse is reported as an error, which
+    the caller treats as *higher* risk rather than lower.
+    """
+    programs: list[str] = []
+    errors: list[str] = []
+
+    for segment in _split_segments(command):
+        _programs_in_segment(segment, programs, errors, depth)
+        for substitution in _substitutions(segment):
+            nested, error = _extract_programs(substitution, depth + 1)
+            programs.extend(nested)
+            if error:
+                errors.append(error)
+
+    # Preserve order while dropping repeats, so the concern line stays readable.
+    seen: set[str] = set()
+    ordered = [p for p in programs if not (p in seen or seen.add(p))]
+    return ordered, errors[0] if errors else None
 
 
 def analyze_command(
