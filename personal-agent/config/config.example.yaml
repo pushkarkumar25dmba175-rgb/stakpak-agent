@@ -1,0 +1,117 @@
+# PersonalOS Agent — a fully annotated configuration.
+# Copy to ~/.personalos/config.yaml (or $PERSONALOS_HOME/config.yaml).
+#
+# `agent init` writes a minimal version of this file for you; this copy exists
+# to document every option in one place.
+#
+# Secrets never appear here. `llm.api_key_env` names an environment variable,
+# and the key is read from it at call time.
+
+active_project: null
+
+llm:
+  provider: anthropic          # anthropic | openai | ollama | echo
+  model: claude-opus-5
+  api_key_env: ANTHROPIC_API_KEY
+  base_url: null               # point at Ollama, vLLM, LM Studio, a proxy…
+  max_output_tokens: 2048
+  temperature: 0.2
+  timeout_seconds: 120
+  context_budget_tokens: 12000 # hard ceiling on everything sent to the model
+  memory_budget_tokens: 3000   # the slice of that budget retrieval may use
+
+workspace:
+  # The ONLY directories the agent can read or write. Everything else is
+  # refused before a tool ever runs. Start narrow; widen when you need to.
+  allowed_roots:
+    - ~/PersonalOS
+    # - ~/Downloads
+    # - ~/Documents/Research
+
+  # Carved back out of the roots above. A deny always beats an allow.
+  denied_paths:
+    - ~/.ssh
+    - ~/.gnupg
+    - ~/.aws
+    - ~/.config/gcloud
+    - ~/.kube
+    - ~/.docker/config.json
+    - ~/.netrc
+    - ~/.password-store
+
+  follow_symlinks: false       # leave off: symlinks are how sandboxes get escaped
+  trash_dir: agent_trash
+  max_read_bytes: 2000000
+  max_write_bytes: 10000000
+
+security:
+  # strict  — confirm everything above read-only, ignoring standing rules
+  # normal  — the documented per-level defaults
+  # relaxed — auto-approve level 2 inside the active project
+  approval_mode: normal
+
+  # Highest level that runs without asking. Capped at 2 by the schema:
+  # levels 3 (destructive) and 4 (external) always ask, every time.
+  auto_approve_max_level: 1
+
+  shell_enabled: true
+  shell_allowlist: [ls, cat, head, tail, wc, grep, find, file, stat, du, df,
+                    echo, pwd, date, which, python3, python, git, rg, sort,
+                    uniq, diff, tree]
+
+  # Matched against the raw command line. A match blocks the command outright —
+  # it is not offered for approval.
+  shell_denied_patterns:
+    - '\brm\s+-[a-zA-Z]*[rf]'
+    - '\bmkfs\b'
+    - '\bdd\s+if='
+    - '\bshutdown\b'
+    - '\bdiskpart\b'
+    - 'curl[^|]*\|\s*(sudo\s+)?(ba)?sh'
+
+  shell_timeout_seconds: 60
+  python_timeout_seconds: 60
+  prefer_trash_over_delete: true   # "delete" means "move to agent_trash"
+  max_retries: 3
+  redact_logs: true                # turning this off is reported by `agent doctor`
+
+memory:
+  episodic_retention_days: 365
+  inferred_confidence_floor: 0.25  # weaker inferences stop being used
+  confidence_half_life_days: 45    # inferred items decay; stated ones never do
+  retrieval_top_k: 8
+  vector_backend: none             # none today; chroma/qdrant/faiss are the seam
+
+learning:
+  enabled: true
+  pattern_similarity_threshold: 0.78
+  min_occurrences_for_suggestion: 3
+  suggestion_cooldown_hours: 12
+  max_suggestions_per_session: 3
+  auto_create_skills: false        # cannot be enabled; skills need your approval
+
+observation:
+  # Everything here is off until you turn it on, and only records that a file
+  # changed — never its contents.
+  watch_folders_enabled: false
+  watched_folders: []
+  watch_clipboard_enabled: false
+  track_app_usage: false
+  paused: false
+  ignore_patterns: ['*.tmp', '*.part', '*.crdownload', '.git/*', '~$*']
+
+scheduler:
+  enabled: true
+  timezone: UTC
+  max_concurrent_jobs: 2
+  skip_jobs_above_level: 2         # unattended jobs can never exceed level 2
+
+dashboard:
+  enabled: false
+  host: 127.0.0.1                  # localhost only; anything else is refused
+  port: 8765
+  read_only: true
+
+notifications:
+  enabled: true
+  backend: auto                    # auto | notify-send | osascript | powershell | console | none

@@ -1,0 +1,208 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PersonalOS Agent</title>
+<style>
+  :root {
+    --bg: #ffffff; --fg: #15181d; --muted: #5c6470; --line: #e3e6ea;
+    --card: #f7f8fa; --accent: #2f6fd0;
+    --l0:#0a7d47; --l1:#0f6fa8; --l2:#a86a00; --l3:#c0392b; --l4:#8e1b1b;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg:#14171c; --fg:#e7eaee; --muted:#9aa4b2; --line:#272c34;
+      --card:#1b1f26; --accent:#74a8f0;
+      --l0:#4cc38a; --l1:#68b6ef; --l2:#e0a458; --l3:#f2705f; --l4:#ff9a8c;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--fg);
+    font: 15px/1.55 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  header {
+    padding: 20px 16px; border-bottom: 1px solid var(--line);
+    display: flex; flex-wrap: wrap; gap: 12px; align-items: baseline;
+  }
+  h1 { font-size: 20px; margin: 0; }
+  .state { font-size: 13px; color: var(--muted); }
+  nav { display: flex; gap: 4px; flex-wrap: wrap; padding: 12px 16px; border-bottom: 1px solid var(--line); }
+  nav button {
+    font: inherit; font-size: 14px; padding: 6px 12px; border-radius: 6px;
+    border: 1px solid transparent; background: transparent; color: var(--muted); cursor: pointer;
+  }
+  nav button[aria-current="true"] { background: var(--card); color: var(--fg); border-color: var(--line); }
+  main { padding: 16px; max-width: 1100px; margin: 0 auto; }
+  table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { color: var(--muted); font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: .04em; }
+  td.wrap { max-width: 460px; overflow-wrap: anywhere; }
+  .chip { font-size: 12px; padding: 2px 8px; border-radius: 999px; border: 1px solid currentColor; white-space: nowrap; }
+  .l0 { color: var(--l0); } .l1 { color: var(--l1); } .l2 { color: var(--l2); }
+  .l3 { color: var(--l3); } .l4 { color: var(--l4); }
+  .ok { color: var(--l0); } .bad { color: var(--l3); }
+  .note { color: var(--muted); font-size: 13px; margin: 0 0 14px; }
+  .cards { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); margin-bottom: 18px; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px; }
+  .card h3 { margin: 0 0 4px; font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
+  .card p { margin: 0; font-size: 18px; }
+  @media (max-width: 640px) { main, header, nav { padding-left: 16px; padding-right: 16px; } td.wrap { max-width: 200px; } }
+</style>
+</head>
+<body>
+<header>
+  <h1>PersonalOS Agent</h1>
+  <span class="state" id="state">loading…</span>
+</header>
+<nav id="nav"></nav>
+<main>
+  <p class="note" id="note">
+    This view is read-only. Approvals happen in the terminal, never here.
+  </p>
+  <div id="view"></div>
+</main>
+<script>
+const TABS = [
+  ["Dashboard", "status"], ["Tasks", "tasks"], ["Memory", "memory"],
+  ["Skills", "skills"], ["Schedules", "schedules"],
+  ["Permissions", "permissions"], ["Audit log", "audit"], ["Settings", "settings"],
+];
+let current = "status";
+
+const esc = (value) => String(value ?? "").replace(/[&<>"]/g, (c) =>
+  ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const risk = (level) =>
+  `<span class="chip l${level}">level ${level}</span>`;
+const yesno = (value) =>
+  value === null || value === undefined ? "—"
+    : `<span class="${value ? "ok" : "bad"}">${value ? "yes" : "no"}</span>`;
+
+async function fetchJSON(path) {
+  const response = await fetch(path);
+  if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
+  return response.json();
+}
+
+function table(columns, rows) {
+  if (!rows.length) return `<p class="note">Nothing here yet.</p>`;
+  return `<table><thead><tr>${columns.map((c) => `<th>${esc(c)}</th>`).join("")}</tr></thead>
+    <tbody>${rows.map((r) => `<tr>${r.map((cell) => `<td class="wrap">${cell}</td>`).join("")}</tr>`).join("")}</tbody></table>`;
+}
+
+const VIEWS = {
+  async status() {
+    const s = await fetchJSON("/api/status");
+    const cards = [
+      ["State", esc(s.state)],
+      ["Project", esc(s.project || "none")],
+      ["Model", esc(s.provider)],
+      ["Approvals", esc(s.approval_mode)],
+      ["Skills", s.skills],
+      ["Suggestions", s.pending_suggestions],
+    ].map(([k, v]) => `<div class="card"><h3>${k}</h3><p>${v}</p></div>`).join("");
+    const memory = Object.entries(s.memory)
+      .map(([k, v]) => `<div class="card"><h3>${esc(k)}</h3><p>${v}</p></div>`).join("");
+    return `<div class="cards">${cards}</div><div class="cards">${memory}</div>
+      <p class="note">${esc(s.state_description)}</p>`;
+  },
+  async tasks() {
+    const rows = (await fetchJSON("/api/tasks")).map((t) => [
+      esc(t.task_id), esc(t.request), esc(t.status), risk(t.max_risk_level),
+      yesno(t.success), esc(t.created_at.slice(0, 16).replace("T", " ")),
+    ]);
+    return table(["Id", "Request", "Status", "Risk", "Succeeded", "When"], rows);
+  },
+  async memory() {
+    const m = await fetchJSON("/api/memory");
+    const prefs = table(
+      ["Key", "Value", "Source", "Confidence", "Used"],
+      m.preferences.map((p) => [
+        esc(p.key), esc(JSON.stringify(p.value)),
+        p.explicit ? "you told me" : esc(p.source),
+        `${Math.round(p.confidence * 100)}%`, p.usage_count,
+      ]));
+    const flows = table(
+      ["Workflow", "Times seen", "Promoted to skill"],
+      m.workflows.map((w) => [esc(w.name), w.success_count, esc(w.promoted_skill || "—")]));
+    return `<h2>Preferences</h2>${prefs}<h2>Workflows</h2>
+      <p class="note">Noticing a workflow is not automating it — that needs your approval.</p>${flows}`;
+  },
+  async skills() {
+    const rows = (await fetchJSON("/api/skills")).map((s) => [
+      esc(s.name), esc(s.description), s.version, esc(s.origin),
+      esc(s.created_by), yesno(s.enabled), risk(s.max_risk_level),
+      s.success_rate === null ? "—" : `${Math.round(s.success_rate * 100)}%`,
+    ]);
+    return table(["Name", "Description", "Version", "Origin", "Author", "Enabled", "Ceiling", "Success"], rows);
+  },
+  async schedules() {
+    const rows = (await fetchJSON("/api/schedules")).map((j) => [
+      esc(j.name), esc(j.spec), esc(j.kind), risk(j.max_risk_level),
+      yesno(j.enabled), esc(j.last_status || "—"),
+    ]);
+    return `<p class="note">Scheduled jobs run unattended and can never approve
+      an action above level 2.</p>${table(["Name", "When", "Kind", "Ceiling", "Enabled", "Last run"], rows)}`;
+  },
+  async permissions() {
+    const p = await fetchJSON("/api/permissions");
+    const allowed = p.paths.allowed_roots.map((x) => `<li>${esc(x)}</li>`).join("");
+    const denied = p.paths.denied_paths.map((x) => `<li>${esc(x)}</li>`).join("");
+    const rules = table(
+      ["Name", "Effect", "Tool", "Operation", "Path", "Up to"],
+      p.rules.map((r) => [
+        esc(r.name), esc(r.effect), esc(r.tool || "any"), esc(r.operation || "any"),
+        esc(r.path_prefix || "any"), risk(r.max_risk_level),
+      ]));
+    return `<div class="cards">
+        <div class="card"><h3>Mode</h3><p>${esc(p.approval_mode)}</p></div>
+        <div class="card"><h3>Automatic up to</h3><p>${risk(p.auto_approve_max_level)}</p></div>
+      </div>
+      <h2>Reachable</h2><ul>${allowed}</ul>
+      <h2>Never reachable</h2><ul>${denied}</ul>
+      <h2>Standing rules</h2>${rules}`;
+  },
+  async audit() {
+    const rows = (await fetchJSON("/api/audit?limit=100")).map((a) => [
+      esc(a.created_at.slice(0, 16).replace("T", " ")), esc(a.task_id.slice(0, 8)),
+      esc(a.tool), esc(a.action), risk(a.risk_level),
+      esc(a.approval_status.replace(/_/g, " ")), yesno(a.success),
+    ]);
+    return table(["When", "Task", "Tool", "Action", "Risk", "Approval", "Ok"], rows);
+  },
+  async settings() {
+    const s = await fetchJSON("/api/settings");
+    return `<pre style="white-space:pre-wrap;overflow-wrap:anywhere">${esc(JSON.stringify(s, null, 2))}</pre>`;
+  },
+};
+
+async function render() {
+  const view = document.getElementById("view");
+  view.innerHTML = `<p class="note">Loading…</p>`;
+  try {
+    view.innerHTML = await VIEWS[current]();
+  } catch (error) {
+    view.innerHTML = `<p class="note bad">Could not load: ${esc(error.message)}</p>`;
+  }
+  document.querySelectorAll("nav button").forEach((button) =>
+    button.setAttribute("aria-current", String(button.dataset.tab === current)));
+}
+
+document.getElementById("nav").innerHTML = TABS
+  .map(([label, key]) => `<button data-tab="${key}">${label}</button>`).join("");
+document.getElementById("nav").addEventListener("click", (event) => {
+  const tab = event.target.closest("button");
+  if (!tab) return;
+  current = tab.dataset.tab;
+  render();
+});
+
+fetchJSON("/api/status")
+  .then((s) => { document.getElementById("state").textContent = `${s.state} · ${s.provider}`; })
+  .catch(() => { document.getElementById("state").textContent = "offline"; });
+render();
+setInterval(() => { if (current === "status") render(); }, 15000);
+</script>
+</body>
+</html>

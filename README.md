@@ -211,6 +211,24 @@ stub HTTP server standing in for the model, so no API key is needed to test.
 - A full TUI with a scrollable transcript and a checkpoint browser
 - An unattended mode with a schedule, for recurring infrastructure checks
 
+## Also in this repository
+
+**[`personal-agent/`](personal-agent/) — PersonalOS Agent**, a local personal
+assistant built on the same security posture, in Python. Where `stakpak` is
+pointed at infrastructure, PersonalOS lives on your own machine: it organises
+files, summarises documents, writes reports, notices the workflows you repeat
+and offers to turn them into reusable skills — with a five-level risk model,
+per-step approval, a JSONL audit log and a rollback journal.
+
+```sh
+cd personal-agent && pip install -e ".[all]"
+agent init --workspace ~/PersonalOS && agent doctor
+```
+
+The two projects share no code. They share the ideas: the model never sees your
+credentials, every write is reversible, and nothing consequential happens
+without you.
+
 ## Prior art
 
 Inspired by [Stakpak](https://github.com/stakpak/agent), an open-source DevOps

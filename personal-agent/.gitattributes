@@ -1,0 +1,13 @@
+# Windows batch files must keep CRLF endings wherever they are checked out:
+# cmd.exe mis-parses labels and `goto` targets in LF-only files.
+*.cmd text eol=crlf
+*.bat text eol=crlf
+*.ps1 text eol=crlf
+
+# Everything else is normalised to LF.
+*.py text eol=lf
+*.yaml text eol=lf
+*.yml text eol=lf
+*.md text eol=lf
+*.toml text eol=lf
+*.json text eol=lf

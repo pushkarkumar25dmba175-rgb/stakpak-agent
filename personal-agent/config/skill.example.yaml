@@ -1,0 +1,67 @@
+# A hand-written skill. Copy into ~/.personalos/skills/ and run it with
+#   agent run archive_reports --input folder=~/Documents/reports
+#
+# Everything here is declarative. A skill cannot execute code the tools do not
+# already expose, and running one goes through the same approval path as any
+# other request — a skill is a saved plan, not a granted permission.
+
+name: archive_reports
+description: Collect reports from a folder into a dated archive directory.
+version: 1
+created_by: user
+tags: [files, reporting]
+
+inputs:
+  folder:
+    type: string
+    description: Where the reports currently live.
+    required: true
+  archive_root:
+    type: string
+    description: Where the archive folders are created.
+    required: false
+    default: "~/PersonalOS/archive"
+
+# Declared for documentation and for `agent skills list`. It grants nothing.
+permissions:
+  - filesystem.read
+  - filesystem.write
+max_risk_level: 2
+
+steps:
+  - id: survey
+    description: See what is in the folder
+    tool: filesystem
+    operation: list
+    arguments:
+      path: "{{ inputs.folder }}"
+      pattern: "*.md"
+    expected_outcome: A list of the Markdown reports present.
+    verification:
+      kind: count_at_least
+      field: count
+      minimum: 0
+
+  - id: make_archive
+    description: Create the archive directory
+    tool: filesystem
+    operation: mkdir
+    arguments:
+      path: "{{ inputs.archive_root }}"
+    verification:
+      kind: path_exists
+
+  - id: manifest
+    description: Write a manifest of what was found
+    tool: filesystem
+    operation: write
+    arguments:
+      path: "{{ inputs.archive_root }}/manifest.md"
+      content: |
+        # Archive manifest
+
+        Source: {{ inputs.folder }}
+        Reports found: {{ steps.survey.data.count }}
+    depends_on: [survey, make_archive]
+    verification:
+      kind: path_nonempty
