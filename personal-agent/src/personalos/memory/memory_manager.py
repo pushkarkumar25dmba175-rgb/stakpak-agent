@@ -11,6 +11,7 @@ at hand. The whole database is never sent to the model. Each request gets:
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -89,18 +90,47 @@ INTENT_KEYWORDS: dict[str, tuple[str, ...]] = {
 }
 
 
+#: Keywords compiled with word boundaries. Plain substring matching classified
+#: "prune the logs" as a *run* request because "run" sits inside "prune", and a
+#: path under /tmp/pytest-of-runner/ as one for the same reason.
+_INTENT_PATTERNS: dict[str, list[tuple[str, re.Pattern[str]]]] = {
+    intent: [(keyword, re.compile(rf"(?<!\w){re.escape(keyword)}(?!\w)")) for keyword in keywords]
+    for intent, keywords in INTENT_KEYWORDS.items()
+}
+
+
 def classify_intent(request: str) -> str:
     """Label a request so retrieval and planning can specialise.
 
     Deliberately keyword-based: it runs with no model available, which matters
     because ``agent doctor`` and the offline provider both rely on it.
+
+    Requests are imperative — "list the folder", "summarise these" — so a
+    keyword in the leading verb position decides the intent outright. Only when
+    the opening words say nothing useful does the whole request get scored, and
+    the longest keyword wins a tie because it is the more specific signal.
     """
-    lowered = request.lower()
-    scores: dict[str, int] = {}
-    for intent, keywords in INTENT_KEYWORDS.items():
-        hits = sum(1 for keyword in keywords if keyword in lowered)
+    lowered = request.strip().lower()
+    if not lowered:
+        return "general"
+
+    # 1. The leading verb, one or two words in, settles it.
+    opening = " ".join(lowered.split()[:2])
+    leading: list[tuple[int, str]] = []
+    for intent, patterns in _INTENT_PATTERNS.items():
+        for keyword, pattern in patterns:
+            match = pattern.search(opening)
+            if match and match.start() == 0:
+                leading.append((len(keyword), intent))
+    if leading:
+        return max(leading)[1]
+
+    # 2. Otherwise count word-boundary matches across the whole request.
+    scores: dict[str, tuple[int, int]] = {}
+    for intent, patterns in _INTENT_PATTERNS.items():
+        hits = [keyword for keyword, pattern in patterns if pattern.search(lowered)]
         if hits:
-            scores[intent] = hits
+            scores[intent] = (len(hits), max(len(keyword) for keyword in hits))
     if not scores:
         return "general"
     return max(scores.items(), key=lambda pair: pair[1])[0]

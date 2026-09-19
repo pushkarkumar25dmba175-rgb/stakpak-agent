@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from datetime import timedelta
 
+import pytest
 from sqlalchemy import select
 
 from personalos.database.models import MemorySource, Preference
@@ -17,6 +18,38 @@ def test_intent_classification() -> None:
     assert classify_intent("find the invoice from March") == "search"
     assert classify_intent("organize my research folder") == "organise"
     assert classify_intent("hello there") == "general"
+
+
+@pytest.mark.parametrize(
+    "request_text",
+    [
+        "list /tmp/pytest-of-runner/pytest-0/test_x0/workspace",
+        "list /home/runner/work/_temp/workspace",
+        "list C:/Users/runner/AppData/Local/Temp/workspace",
+    ],
+)
+def test_a_username_in_a_path_does_not_change_the_intent(request_text: str) -> None:
+    """Substring matching read "run" inside "runner" and called this a run request.
+
+    It passed on a developer machine (/tmp/pytest-of-root/) and failed on CI,
+    where the account is called `runner` — so the whole plan came out empty and
+    six integration tests failed with nothing recorded.
+    """
+    assert classify_intent(request_text) == "inspect"
+
+
+@pytest.mark.parametrize(
+    "request_text,expected",
+    [
+        ("prune the logs", "general"),        # "run" inside "prune"
+        ("run the deploy script", "run"),     # the real verb still works
+        ("read the report", "inspect"),
+        ("find the file", "search"),          # leading verb beats a later keyword
+        ("schedule a recurring cleanup", "automate"),
+    ],
+)
+def test_keywords_match_whole_words(request_text: str, expected: str) -> None:
+    assert classify_intent(request_text) == expected
 
 
 # ---- preferences -----------------------------------------------------------
