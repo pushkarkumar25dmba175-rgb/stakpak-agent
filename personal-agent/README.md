@@ -61,6 +61,29 @@ weak. `agent memory` shows you all of it; `agent memory forget` removes any of i
 
 Python 3.12 or newer.
 
+### Windows (Command Prompt)
+
+One command, from anywhere — it clones the repository, builds the environment,
+sets up the agent and checks it works:
+
+```bat
+curl -L -o %TEMP%\posbootstrap.cmd https://raw.githubusercontent.com/pushkarkumar25dmba175-rgb/stakpak-agent/claude/stoic-lovelace-3fzaxx/personal-agent/packaging/windows/bootstrap.cmd && %TEMP%\posbootstrap.cmd
+```
+
+Already cloned? Run the deployment directly:
+
+```bat
+cd personal-agent\packaging\windows
+deploy.cmd
+deploy.cmd D:\Work\Agent        ^&^& REM optional: choose the workspace folder
+```
+
+Both are safe to re-run — they update in place rather than starting over.
+`uninstall.cmd` removes the environment and offers to remove the agent's home;
+your workspace files are never touched.
+
+### macOS and Linux
+
 ```sh
 git clone https://github.com/pushkarkumar25dmba175-rgb/stakpak-agent
 cd stakpak-agent/personal-agent
@@ -107,6 +130,24 @@ agent feedback "always save reports as Markdown"  # teach it something
 ```
 
 ---
+
+## What deployment does
+
+`deploy.cmd` is six steps, and it stops at the first one that fails rather than
+leaving you with a half-installed agent:
+
+1. **Finds Python** — tries the `py` launcher for 3.13 and 3.12, then `python`
+   on PATH, checking the version rather than assuming.
+2. **Creates `.venv`** — reuses an existing one, so a re-run is an update.
+3. **Installs** the package with the `[all]` extras, plus `psutil` (which is
+   what lets the agent list processes on Windows).
+4. **Sets up the workspace** and the agent's home at `%USERPROFILE%\.personalos`.
+5. **Runs `agent doctor`** — the health check, including your security posture.
+6. **Runs a real task** against your workspace, so you see it work before you
+   trust it.
+
+It never installs globally, never needs administrator rights, and never writes
+outside the project folder, your workspace and `%USERPROFILE%\.personalos`.
 
 ## The security model
 

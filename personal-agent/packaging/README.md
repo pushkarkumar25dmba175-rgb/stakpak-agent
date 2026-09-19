@@ -1,3 +1,15 @@
+# Deployment and startup
+
+## Deploying on Windows
+
+| Script | What it does |
+|---|---|
+| `windows/bootstrap.cmd` | Clones the repository, then runs `deploy.cmd`. |
+| `windows/deploy.cmd` | Builds the environment, installs, initialises, health-checks and runs a test task. |
+| `windows/uninstall.cmd` | Removes the environment and the scheduled task; offers to remove the agent's home. |
+
+All three are safe to re-run and none of them need administrator rights.
+
 # Starting PersonalOS with your computer
 
 These templates start the **agent service only** — the scheduler and, if you

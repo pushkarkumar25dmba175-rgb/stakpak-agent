@@ -33,11 +33,25 @@ class StopProcessInput(BaseModel):
     force: bool = Field(default=False, description="Send SIGKILL instead of SIGTERM.")
 
 
+class ProcessListingUnavailable(RuntimeError):
+    """Raised when this platform cannot enumerate processes as configured."""
+
+
 def _iter_processes() -> list[dict[str, Any]]:
-    """Enumerate processes, preferring psutil and falling back to /proc."""
+    """Enumerate processes, preferring psutil and falling back to /proc.
+
+    Raises:
+        ProcessListingUnavailable: on a platform with neither psutil nor
+            ``/proc``. Returning an empty list there would read as "nothing is
+            running", which is worse than saying the tool cannot see.
+    """
     try:
         import psutil  # type: ignore[import-not-found]
     except ImportError:
+        if not os.path.isdir("/proc"):
+            raise ProcessListingUnavailable(
+                "Listing processes on this platform needs the optional `psutil` package."
+            ) from None
         return _iter_proc_fs()
     processes = []
     for proc in psutil.process_iter(["pid", "name", "username", "cmdline", "cpu_percent"]):
@@ -109,7 +123,12 @@ class ProcessManagerTool(Tool):
         args = call.arguments
         assert isinstance(args, StopProcessInput)
 
-        target = next((p for p in _iter_processes() if p["pid"] == args.pid), None)
+        try:
+            running = _iter_processes()
+        except ProcessListingUnavailable as exc:
+            call.blocked_reason = str(exc)
+            return call
+        target = next((p for p in running if p["pid"] == args.pid), None)
         if target is None:
             call.blocked_reason = f"No process with PID {args.pid} is running."
             return call
@@ -136,7 +155,12 @@ class ProcessManagerTool(Tool):
         if call.operation == "list":
             args = call.arguments
             assert isinstance(args, ListProcessesInput)
-            processes = _iter_processes()
+            try:
+                processes = _iter_processes()
+            except ProcessListingUnavailable as exc:
+                return ToolResult.failed(
+                    f"{exc} Install it with `pip install psutil`."
+                )
             if args.filter:
                 needle = args.filter.lower()
                 processes = [
@@ -154,8 +178,11 @@ class ProcessManagerTool(Tool):
         assert isinstance(args, StopProcessInput)
         if context.dry_run:
             return ToolResult.ok(f"[dry run] Would stop PID {args.pid}.")
+        # Windows has no SIGKILL; there os.kill() maps SIGTERM onto
+        # TerminateProcess, which is already the forceful stop.
+        forceful = getattr(signal, "SIGKILL", signal.SIGTERM)
         try:
-            os.kill(args.pid, signal.SIGKILL if args.force else signal.SIGTERM)
+            os.kill(args.pid, forceful if args.force else signal.SIGTERM)
         except ProcessLookupError:
             return ToolResult.failed(f"PID {args.pid} was already gone.")
         except PermissionError:
@@ -165,7 +192,8 @@ class ProcessManagerTool(Tool):
         context.journal.record_irreversible(
             context.task_id, f"stopped process {args.pid}", step_id=context.step_id
         )
+        signal_name = getattr(forceful if args.force else signal.SIGTERM, "name", "signal")
         return ToolResult.ok(
-            f"Sent {'SIGKILL' if args.force else 'SIGTERM'} to PID {args.pid}.",
-            data={"pid": args.pid, "force": args.force},
+            f"Sent {signal_name} to PID {args.pid}.",
+            data={"pid": args.pid, "force": args.force, "signal": signal_name},
         )

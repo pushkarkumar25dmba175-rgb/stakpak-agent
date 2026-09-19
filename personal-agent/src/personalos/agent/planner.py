@@ -46,6 +46,19 @@ Respond with exactly this JSON shape:
 ]}"""
 
 
+#: Anything that makes a string look like a path rather than a word.
+_PATH_HINT = re.compile(r"[/\\]|^[A-Za-z]:")
+
+#: An unquoted path in a sentence: a drive letter, a UNC share, a `~` path, or
+#: any token containing a separator.
+_BARE_PATH = re.compile(
+    r"(?:[A-Za-z]:[\\/][^\s\"\']*"       # C:\Users\me\Documents
+    r"|\\\\[^\s\"\']+"                  # \\server\share
+    r"|~[\\/][^\s\"\']*"                  # ~/Documents or ~\Documents
+    r"|[\w.-]*[\\/][\w.\\/-]+)"           # relative or absolute with a separator
+)
+
+
 class HeuristicPlanner:
     """Produces plans for common requests without consulting a model."""
 
@@ -54,16 +67,22 @@ class HeuristicPlanner:
 
     @staticmethod
     def _extract_path(request: str) -> str | None:
-        """Pull a filesystem path out of a request, if there is an obvious one."""
+        """Pull a filesystem path out of a request, if there is an obvious one.
+
+        Handles POSIX paths, `~` paths and Windows paths — both `C:\\Users\\me`
+        and UNC `\\\\server\\share`. A Windows user typing a native path should
+        not get the "I could not work out concrete steps" answer.
+        """
         quoted = re.findall(r"['\"]([^'\"]+)['\"]", request)
         for candidate in quoted:
-            if "/" in candidate or candidate.startswith("~"):
+            if _PATH_HINT.search(candidate) or candidate.startswith("~"):
                 return candidate
-        for token in re.findall(r"(~?[\w./-]*/[\w./-]+)", request):
-            return token
+        match = _BARE_PATH.search(request)
+        if match:
+            return match.group(0).rstrip(".,;:!?")
         for word in ("Downloads", "Documents", "Desktop", "Research"):
             if word.lower() in request.lower():
-                return f"~/{word}"
+                return str(Path.home() / word)
         return None
 
     def plan(self, request: str, *, default_path: str | None = None) -> Plan:

@@ -379,3 +379,26 @@ def test_cli_observe_status_states_that_it_is_off(cli) -> None:
     result = cli.invoke(app, ["observe", "status"])
     assert result.exit_code == 0
     assert "off" in result.stdout
+
+
+def test_init_replaces_the_placeholder_workspace(tmp_path, monkeypatch) -> None:
+    """`agent init --workspace X` should not leave the unused default behind."""
+    from typer.testing import CliRunner
+
+    from personalos.interface import cli as cli_module
+    from personalos.settings import load_settings
+
+    home = tmp_path / "home"
+    workspace = tmp_path / "chosen"
+    workspace.mkdir()
+
+    cli_module.state.home = home
+    cli_module.state._settings = None
+    cli_module.state._agent = None
+    monkeypatch.setenv("COLUMNS", "220")
+
+    result = CliRunner().invoke(cli_module.app, ["--home", str(home), "init", "--workspace", str(workspace)])
+    assert result.exit_code == 0
+
+    settings = load_settings(home=home, use_env=False)
+    assert settings.workspace.allowed_roots == [str(workspace)]

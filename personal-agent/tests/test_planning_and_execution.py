@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from personalos.agent.executor import Executor
 from personalos.agent.plan import Plan, PlanStep, VerificationSpec, resolve_templates
 from personalos.agent.planner import HeuristicPlanner, LLMPlanner
@@ -60,6 +62,26 @@ def test_heuristic_planner_handles_a_listing_request(registry, workspace: Path) 
     plan = HeuristicPlanner(registry).plan(f"show me what is in {workspace}")
     assert plan.source == "heuristic"
     assert plan.steps[0].tool == "filesystem"
+
+
+@pytest.mark.parametrize(
+    "request_text,expected",
+    [
+        (r"list C:\Users\bob\PersonalOS", r"C:\Users\bob\PersonalOS"),
+        (r"organise C:/Users/bob/Downloads", "C:/Users/bob/Downloads"),
+        (r"what is in \\fileserver\share\reports", r"\\fileserver\share\reports"),
+        ("list /home/me/docs", "/home/me/docs"),
+        ("summarise ~/Research/notes.md", "~/Research/notes.md"),
+        ('read "C:\\Program Files\\app\\log.txt"', "C:\\Program Files\\app\\log.txt"),
+    ],
+)
+def test_paths_are_extracted_on_every_platform(request_text: str, expected: str) -> None:
+    """A Windows user typing a native path must not get "I cannot help"."""
+    assert HeuristicPlanner._extract_path(request_text) == expected
+
+
+def test_prose_without_a_path_extracts_nothing() -> None:
+    assert HeuristicPlanner._extract_path("write me a haiku about autumn") is None
 
 
 def test_heuristic_planner_says_so_when_it_cannot_help(registry) -> None:

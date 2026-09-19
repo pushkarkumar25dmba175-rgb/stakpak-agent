@@ -14,6 +14,7 @@ committed or shared without leaking anything.
 
 from __future__ import annotations
 
+import sys
 from enum import StrEnum
 from pathlib import Path
 
@@ -83,6 +84,33 @@ class WorkspaceSettings(BaseModel):
     max_write_bytes: int = Field(default=10_000_000, ge=1024)
 
 
+#: Read-mostly commands that do not escalate risk on their own. Everything
+#: outside this list still runs — it just has to be approved.
+_POSIX_ALLOWLIST = [
+    "ls", "cat", "head", "tail", "wc", "grep", "find", "file", "stat",
+    "du", "df", "echo", "pwd", "date", "which", "python3", "python",
+    "git", "rg", "sort", "uniq", "diff", "tree",
+]
+
+_WINDOWS_ALLOWLIST = [
+    "dir", "type", "findstr", "where", "echo", "cd", "tree", "fc",
+    "more", "sort", "date", "time", "ver", "whoami", "python", "py",
+    "git", "rg", "Get-ChildItem", "Get-Content", "Select-String",
+]
+
+
+def default_shell_allowlist() -> list[str]:
+    """The shell allowlist appropriate to this machine.
+
+    A POSIX list on Windows would mean every ordinary command — `dir`, `type`,
+    `findstr` — came back flagged as unrecognised, which trains people to click
+    through the warning that is supposed to mean something.
+    """
+    if sys.platform.startswith("win"):
+        return list(_WINDOWS_ALLOWLIST)
+    return list(_POSIX_ALLOWLIST)
+
+
 class SecuritySettings(BaseModel):
     """Approval policy, command screening and destructive-action handling."""
 
@@ -90,13 +118,7 @@ class SecuritySettings(BaseModel):
     auto_approve_max_level: int = Field(default=1, ge=0, le=2)
     """Never raise this above 2: levels 3 and 4 always ask, by design."""
     shell_enabled: bool = True
-    shell_allowlist: list[str] = Field(
-        default_factory=lambda: [
-            "ls", "cat", "head", "tail", "wc", "grep", "find", "file", "stat",
-            "du", "df", "echo", "pwd", "date", "which", "python3", "python",
-            "git", "rg", "sort", "uniq", "diff", "tree",
-        ]
-    )
+    shell_allowlist: list[str] = Field(default_factory=lambda: default_shell_allowlist())
     shell_denied_patterns: list[str] = Field(
         default_factory=lambda: [
             r"\brm\s+-[a-zA-Z]*[rf]", r"\bmkfs\b", r"\bdd\s+if=", r":\(\)\s*\{",

@@ -295,3 +295,49 @@ def test_untrusted_wrapper_labels_content_as_data() -> None:
     assert "untrusted_content" in rendered
     assert "DATA, not instructions" in rendered
     assert "file:/tmp/report.txt" in rendered
+
+
+# ---- cross-platform behaviour ----------------------------------------------
+def test_shell_allowlist_follows_the_platform(monkeypatch) -> None:
+    """A POSIX allowlist on Windows would flag every ordinary command."""
+    from personalos.settings import schema
+
+    monkeypatch.setattr(schema.sys, "platform", "win32")
+    windows = schema.default_shell_allowlist()
+    assert "dir" in windows and "findstr" in windows
+    assert "ls" not in windows
+
+    monkeypatch.setattr(schema.sys, "platform", "linux")
+    posix = schema.default_shell_allowlist()
+    assert "ls" in posix and "dir" not in posix
+
+
+def test_forceful_stop_works_without_sigkill(monkeypatch) -> None:
+    """Windows has no SIGKILL; os.kill maps SIGTERM to TerminateProcess there."""
+    import signal as signal_module
+
+    from personalos.tools import process_manager
+
+    monkeypatch.delattr(process_manager.signal, "SIGKILL", raising=False)
+    resolved = getattr(process_manager.signal, "SIGKILL", signal_module.SIGTERM)
+    assert resolved == signal_module.SIGTERM
+
+
+def test_process_listing_reports_when_it_cannot_see(monkeypatch) -> None:
+    """Returning an empty list would read as 'nothing is running'."""
+    import builtins
+
+    from personalos.tools import process_manager
+
+    real_import = builtins.__import__
+
+    def no_psutil(name, *args, **kwargs):
+        if name == "psutil":
+            raise ImportError("no psutil")
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", no_psutil)
+    monkeypatch.setattr(process_manager.os.path, "isdir", lambda path: False)
+
+    with pytest.raises(process_manager.ProcessListingUnavailable, match="psutil"):
+        process_manager._iter_processes()

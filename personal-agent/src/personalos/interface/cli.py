@@ -30,7 +30,13 @@ from personalos.interface.daily import evening_brief, morning_brief
 from personalos.interface.doctor import run_checks
 from personalos.scheduler.scheduler import Scheduler
 from personalos.security.risk import RiskLevel
-from personalos.settings import Settings, initialise_home, load_settings, save_settings
+from personalos.settings import (
+    Settings,
+    WorkspaceSettings,
+    initialise_home,
+    load_settings,
+    save_settings,
+)
 from personalos.skills.schema import load_skill_file
 from personalos.utils.textutil import truncate
 from personalos.version import __version__
@@ -127,8 +133,14 @@ def init(
     """Create the agent's home directory and a starter configuration."""
     settings = initialise_home(state.home)
     if workspace is not None:
-        roots = set(settings.workspace.allowed_roots) | {str(workspace)}
-        settings.workspace.allowed_roots = sorted(roots)
+        default_roots = WorkspaceSettings().allowed_roots
+        current = settings.workspace.allowed_roots
+        if current == default_roots:
+            # The untouched placeholder is replaced, not added to: warning about
+            # a ~/PersonalOS the user never asked for is noise on a fresh setup.
+            settings.workspace.allowed_roots = [str(workspace)]
+        else:
+            settings.workspace.allowed_roots = sorted(set(current) | {str(workspace)})
         save_settings(settings)
     ui.success(f"PersonalOS is set up in {settings.home}")
     console.print(f"  config:    {settings.config_file}")
