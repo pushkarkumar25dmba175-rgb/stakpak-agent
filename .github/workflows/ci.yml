@@ -9,7 +9,9 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  # The Rust DevOps agent at the repository root.
   check:
+    name: rust
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -23,3 +25,48 @@ jobs:
         run: cargo clippy --all-targets -- -D warnings
       - name: Test
         run: cargo test
+
+  # PersonalOS Agent, the Python assistant in personal-agent/.
+  # Both supported interpreters are exercised, because the package claims
+  # 3.12+ and an untested claim is a promise waiting to break.
+  personal-agent:
+    name: python ${{ matrix.python-version }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.12", "3.13"]
+    defaults:
+      run:
+        working-directory: personal-agent
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+          cache-dependency-path: personal-agent/pyproject.toml
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install --editable ".[all,dev]"
+
+      - name: Lint
+        run: ruff check src tests
+
+      - name: Test
+        run: pytest tests -q
+
+      # The install path people are told to follow in the README, checked on
+      # every PR so a broken first-run is caught here rather than by a user.
+      - name: Verify a fresh setup works end to end
+        env:
+          PERSONALOS_HOME: ${{ runner.temp }}/personalos-ci
+        run: |
+          mkdir -p "${{ runner.temp }}/workspace"
+          echo "hello" > "${{ runner.temp }}/workspace/readme.txt"
+          agent init --workspace "${{ runner.temp }}/workspace"
+          agent doctor
+          agent ask "list ${{ runner.temp }}/workspace" --no-show-plan
